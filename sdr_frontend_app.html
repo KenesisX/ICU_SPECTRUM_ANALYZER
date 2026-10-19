@@ -1,0 +1,821 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>STRIKEBACK SDR Analysis Platform</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.5.4/socket.io.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/plotly.js/2.26.0/plotly.min.js"></script>
+<style>
+* { box-sizing: border-box; }
+
+:root {
+  --dark: #0a0a0a;
+  --darker: #050505;
+  --red: #ff1744;
+  --dark-red: #c41c3b;
+  --blue: #3498db;
+  --green: #27ae60;
+  --gray: #2a2a2a;
+  --text: #ffffff;
+  --text-secondary: #cccccc;
+}
+
+html, body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  background: var(--dark);
+  color: var(--text);
+  font-family: 'Courier New', monospace;
+  overflow: hidden;
+}
+
+#root {
+  display: flex;
+  height: 100vh;
+  flex-direction: column;
+}
+
+/* HEADER */
+#header {
+  background: linear-gradient(90deg, var(--darker) 0%, var(--gray) 100%);
+  padding: 16px;
+  border-bottom: 2px solid var(--red);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 20px;
+}
+
+.logo {
+  font-size: 18px;
+  font-weight: 900;
+  color: var(--red);
+  letter-spacing: 2px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.status-indicator {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--green);
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+.status-indicator.inactive {
+  background: var(--red);
+  animation: none;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+.header-info {
+  display: flex;
+  gap: 20px;
+  align-items: center;
+  flex-grow: 1;
+}
+
+.info-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.info-label {
+  font-size: 0.8em;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.info-value {
+  font-size: 1.1em;
+  font-weight: 700;
+  color: var(--blue);
+}
+
+.controls {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.btn {
+  padding: 10px 16px;
+  border: 1.5px solid var(--red);
+  background: transparent;
+  color: var(--red);
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.9em;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  transition: all 0.2s ease;
+  font-family: 'Courier New', monospace;
+}
+
+.btn:hover {
+  background: var(--red);
+  color: white;
+  box-shadow: 0 0 10px rgba(255, 23, 68, 0.3);
+}
+
+.btn.active {
+  background: var(--red);
+  color: white;
+}
+
+.btn.success {
+  border-color: var(--green);
+  color: var(--green);
+}
+
+.btn.success:hover {
+  background: var(--green);
+  color: white;
+}
+
+/* MAIN CONTENT */
+#content {
+  display: flex;
+  flex-grow: 1;
+  gap: 12px;
+  padding: 12px;
+  overflow: hidden;
+}
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  background: var(--gray);
+  border: 1px solid var(--red);
+  border-radius: 8px;
+  padding: 12px;
+  overflow: hidden;
+  box-shadow: 0 0 10px rgba(255, 23, 68, 0.1);
+}
+
+.panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid var(--red);
+  padding-bottom: 8px;
+  margin-bottom: 8px;
+  font-size: 0.95em;
+  font-weight: 700;
+  color: var(--red);
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+
+.panel-content {
+  flex-grow: 1;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+#spectrum-panel {
+  flex: 2;
+  min-width: 400px;
+}
+
+#iq-panel {
+  flex: 1;
+  min-width: 300px;
+}
+
+#waterfall-panel {
+  flex: 1.5;
+  min-width: 400px;
+}
+
+#signal-panel {
+  flex: 1;
+  min-width: 300px;
+  overflow-y: auto;
+}
+
+/* VISUALIZATIONS */
+canvas {
+  max-width: 100%;
+  max-height: 100%;
+}
+
+.waterfall-container {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--darker);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.waterfall-canvas {
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+}
+
+/* SIGNAL LIST */
+.signal-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  overflow-y: auto;
+  flex-grow: 1;
+}
+
+.signal-item {
+  padding: 8px;
+  background: linear-gradient(90deg, rgba(255, 23, 68, 0.1) 0%, rgba(255, 23, 68, 0) 100%);
+  border-left: 3px solid var(--red);
+  border-radius: 4px;
+  font-size: 0.85em;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.signal-item:hover {
+  background: linear-gradient(90deg, rgba(255, 23, 68, 0.2) 0%, rgba(255, 23, 68, 0.05) 100%);
+  transform: translateX(4px);
+}
+
+.signal-freq {
+  color: var(--blue);
+  font-weight: 700;
+}
+
+.signal-power {
+  color: var(--text-secondary);
+  font-size: 0.8em;
+}
+
+.signal-mod {
+  color: var(--green);
+  font-weight: 700;
+}
+
+/* CONTROLS SIDEBAR */
+#control-panel {
+  width: 280px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  background: var(--gray);
+  border: 1px solid var(--red);
+  border-radius: 8px;
+  padding: 12px;
+  overflow-y: auto;
+  box-shadow: 0 0 10px rgba(255, 23, 68, 0.1);
+}
+
+.control-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  background: var(--darker);
+  border-radius: 4px;
+  border: 1px solid rgba(255, 23, 68, 0.2);
+}
+
+.control-label {
+  font-size: 0.8em;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  font-weight: 700;
+}
+
+.control-input {
+  padding: 8px;
+  background: var(--dark);
+  border: 1px solid var(--red);
+  color: var(--text);
+  border-radius: 4px;
+  font-family: 'Courier New', monospace;
+  font-size: 0.9em;
+  transition: all 0.2s ease;
+}
+
+.control-input:focus {
+  outline: none;
+  border-color: var(--blue);
+  box-shadow: 0 0 10px rgba(52, 152, 219, 0.3);
+}
+
+select {
+  padding: 8px;
+  background: var(--dark);
+  border: 1px solid var(--red);
+  color: var(--text);
+  border-radius: 4px;
+  font-family: 'Courier New', monospace;
+  font-size: 0.9em;
+  cursor: pointer;
+}
+
+select:focus {
+  outline: none;
+  border-color: var(--blue);
+  box-shadow: 0 0 10px rgba(52, 152, 219, 0.3);
+}
+
+.demod-buttons {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.demod-btn {
+  padding: 8px 12px;
+  border: 1px solid var(--blue);
+  background: transparent;
+  color: var(--blue);
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.8em;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  transition: all 0.2s ease;
+  font-family: 'Courier New', monospace;
+}
+
+.demod-btn:hover {
+  background: var(--blue);
+  color: white;
+}
+
+/* RESPONSIVE */
+@media (max-width: 1600px) {
+  #content {
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  #spectrum-panel,
+  #waterfall-panel,
+  #iq-panel,
+  #signal-panel {
+    flex: 1 !important;
+    min-width: unset !important;
+  }
+
+  #control-panel {
+    width: 100%;
+    max-height: 200px;
+  }
+}
+
+/* SCROLLBAR */
+::-webkit-scrollbar {
+  width: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--darker);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, var(--red), var(--blue));
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(180deg, var(--blue), var(--red));
+}
+</style>
+</head>
+<body>
+
+<div id="root">
+  <div id="header">
+    <div class="logo">
+      ⚡ STRIKEBACK SDR
+      <span class="status-indicator" id="status-led"></span>
+    </div>
+
+    <div class="header-info">
+      <div class="info-item">
+        <div class="info-label">CENTER FREQ</div>
+        <div class="info-value" id="freq-display">100.0 MHz</div>
+      </div>
+      <div class="info-item">
+        <div class="info-label">SAMPLE RATE</div>
+        <div class="info-value" id="samplerate-display">2.4 Msps</div>
+      </div>
+      <div class="info-item">
+        <div class="info-label">SIGNALS</div>
+        <div class="info-value" id="signal-count">0</div>
+      </div>
+      <div class="info-item">
+        <div class="info-label">MODE</div>
+        <div class="info-value" id="mode-display">OFFLINE</div>
+      </div>
+    </div>
+
+    <div class="controls">
+      <button class="btn" id="start-btn" onclick="startCapture()">▶ START</button>
+      <button class="btn" id="stop-btn" onclick="stopCapture()" style="display:none;">⏹ STOP</button>
+      <button class="btn" id="save-btn" onclick="saveCapture()">💾 SAVE</button>
+    </div>
+  </div>
+
+  <div id="content">
+    <!-- SPECTRUM PANEL -->
+    <div id="spectrum-panel" class="panel">
+      <div class="panel-header">
+        📊 SPECTRUM ANALYZER
+        <div style="font-size: 0.7em; color: var(--text-secondary);">0 dBm</div>
+      </div>
+      <div class="panel-content">
+        <canvas id="spectrum-canvas"></canvas>
+      </div>
+    </div>
+
+    <!-- WATERFALL PANEL -->
+    <div id="waterfall-panel" class="panel">
+      <div class="panel-header">
+        ≡ WATERFALL (300s)
+        <div style="font-size: 0.7em; color: var(--text-secondary);">Rolling Display</div>
+      </div>
+      <div class="panel-content">
+        <div class="waterfall-container">
+          <canvas id="waterfall-canvas" class="waterfall-canvas"></canvas>
+        </div>
+      </div>
+    </div>
+
+    <!-- IQ CONSTELLATION PANEL -->
+    <div id="iq-panel" class="panel">
+      <div class="panel-header">
+        🔹 IQ CONSTELLATION
+        <div style="font-size: 0.7em; color: var(--text-secondary);" id="mod-display">UNKNOWN</div>
+      </div>
+      <div class="panel-content">
+        <canvas id="iq-canvas"></canvas>
+      </div>
+    </div>
+
+    <!-- SIGNAL DETECTIONS PANEL -->
+    <div id="signal-panel" class="panel">
+      <div class="panel-header">
+        🎯 SIGNAL DETECTIONS
+        <div style="font-size: 0.7em; color: var(--text-secondary);" id="signal-badge">0/10</div>
+      </div>
+      <div class="panel-content">
+        <div class="signal-list" id="signal-list">
+          <div style="color: var(--text-secondary); text-align: center; padding: 20px;">
+            Waiting for signals...
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- CONTROL PANEL -->
+    <div id="control-panel">
+      <div class="control-group">
+        <label class="control-label">🎙️ Device</label>
+        <select id="device-select" onchange="selectDevice()">
+          <option value="rtlsdr">RTL-SDR V4</option>
+          <option value="pluto">ADALM Pluto</option>
+          <option value="hackrf">HackRF One</option>
+          <option value="esp32_cc1101">ESP32 + CC1101</option>
+          <option value="esp32_nrf24">ESP32 + NRF24</option>
+          <option value="kvmp">Mobile KVMP</option>
+        </select>
+      </div>
+
+      <div class="control-group">
+        <label class="control-label">📡 Frequency (MHz)</label>
+        <input type="number" class="control-input" id="freq-input" value="100" 
+               onchange="setFrequency()" step="0.1">
+      </div>
+
+      <div class="control-group">
+        <label class="control-label">🔧 Sample Rate (Msps)</label>
+        <select id="samplerate-select" onchange="setSampleRate()">
+          <option value="1">1</option>
+          <option value="2.4" selected>2.4</option>
+          <option value="3.2">3.2</option>
+          <option value="10">10</option>
+          <option value="20">20</option>
+        </select>
+      </div>
+
+      <div class="control-group">
+        <label class="control-label">📊 FFT Size</label>
+        <select id="fft-size" onchange="setFFTSize()">
+          <option value="512">512</option>
+          <option value="1024">1024</option>
+          <option value="2048" selected>2048</option>
+          <option value="4096">4096</option>
+          <option value="8192">8192</option>
+        </select>
+      </div>
+
+      <div class="control-group">
+        <label class="control-label">🔊 DEMODULATION</label>
+        <div class="demod-buttons">
+          <button class="demod-btn" onclick="demodulate('fm')">FM</button>
+          <button class="demod-btn" onclick="demodulate('am')">AM</button>
+          <button class="demod-btn" onclick="demodulate('lsb')">LSB</button>
+          <button class="demod-btn" onclick="demodulate('fsk')">FSK</button>
+        </div>
+      </div>
+
+      <div class="control-group">
+        <label class="control-label">🎯 Signal Threshold (dBm)</label>
+        <input type="number" class="control-input" id="threshold-input" value="-80" step="1">
+      </div>
+
+      <div class="control-group">
+        <label class="control-label">📍 Detection Range</label>
+        <select id="range-select">
+          <option value="all">All Frequencies</option>
+          <option value="lf">LF (30-300 kHz)</option>
+          <option value="mf">MF (300-3000 kHz)</option>
+          <option value="hf">HF (3-30 MHz)</option>
+          <option value="vhf">VHF (30-300 MHz)</option>
+          <option value="uhf">UHF (300-3000 MHz)</option>
+          <option value="shf">SHF (3-30 GHz)</option>
+        </select>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// Global state
+const state = {
+  isCapturing: false,
+  centerFreq: 100e6,
+  sampleRate: 2.4e6,
+  fftSize: 2048,
+  socket: null,
+  spectrumChart: null,
+  iqChart: null,
+  waterfallData: [],
+};
+
+// Initialize
+document.addEventListener('DOMContentLoaded', () => {
+  initSocket();
+  initCharts();
+});
+
+// WebSocket connection
+function initSocket() {
+  state.socket = io('http://localhost:5000', {
+    reconnection: true,
+    reconnectionDelay: 1000,
+    reconnectionDelayMax: 5000,
+  });
+
+  state.socket.on('connect', () => {
+    console.log('Connected to SDR server');
+    updateStatus(true);
+  });
+
+  state.socket.on('disconnect', () => {
+    console.log('Disconnected from server');
+    updateStatus(false);
+  });
+
+  state.socket.on('spectrum_update', (data) => {
+    updateSpectrumChart(data.frequencies, data.power_db);
+  });
+
+  state.socket.on('iq_update', (data) => {
+    updateIQChart(data.i_values, data.q_values);
+  });
+}
+
+// Initialize charts
+function initCharts() {
+  // Spectrum Chart
+  const specCtx = document.getElementById('spectrum-canvas').getContext('2d');
+  state.spectrumChart = new Chart(specCtx, {
+    type: 'line',
+    data: {
+      labels: [],
+      datasets: [{
+        label: 'Power Spectrum',
+        data: [],
+        borderColor: '#ff1744',
+        backgroundColor: 'rgba(255, 23, 68, 0.1)',
+        borderWidth: 1.5,
+        tension: 0.1,
+        fill: true,
+        pointRadius: 0,
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: { duration: 0 },
+      plugins: {
+        legend: { display: false },
+        filler: { propagate: true },
+      },
+      scales: {
+        x: {
+          display: true,
+          grid: { color: 'rgba(255, 23, 68, 0.1)' },
+          ticks: { color: '#cccccc', maxTicksLimit: 10 },
+          title: { display: true, text: 'Frequency (MHz)', color: '#cccccc' },
+        },
+        y: {
+          display: true,
+          grid: { color: 'rgba(255, 23, 68, 0.1)' },
+          ticks: { color: '#cccccc' },
+          title: { display: true, text: 'Power (dB)', color: '#cccccc' },
+          min: -120,
+          max: 0,
+        }
+      }
+    }
+  });
+
+  // IQ Chart
+  const iqCtx = document.getElementById('iq-canvas').getContext('2d');
+  state.iqChart = new Chart(iqCtx, {
+    type: 'scatter',
+    data: {
+      datasets: [{
+        label: 'IQ Constellation',
+        data: [],
+        borderColor: '#3498db',
+        backgroundColor: 'rgba(52, 152, 219, 0.3)',
+        pointRadius: 3,
+        pointHoverRadius: 5,
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: { duration: 0 },
+      plugins: {
+        legend: { display: false },
+      },
+      scales: {
+        x: {
+          display: true,
+          grid: { color: 'rgba(52, 152, 219, 0.1)' },
+          ticks: { color: '#cccccc' },
+          title: { display: true, text: 'In-Phase (I)', color: '#cccccc' },
+          min: -1.5,
+          max: 1.5,
+        },
+        y: {
+          display: true,
+          grid: { color: 'rgba(52, 152, 219, 0.1)' },
+          ticks: { color: '#cccccc' },
+          title: { display: true, text: 'Quadrature (Q)', color: '#cccccc' },
+          min: -1.5,
+          max: 1.5,
+        }
+      }
+    }
+  });
+}
+
+// Update spectrum chart
+function updateSpectrumChart(frequencies, powers) {
+  if (!state.spectrumChart) return;
+  
+  const centerMHz = state.centerFreq / 1e6;
+  const bwMHz = state.sampleRate / 1e6;
+  
+  state.spectrumChart.data.labels = frequencies.slice(0, -1)
+    .map(f => (f / 1e6 + centerMHz - bwMHz/2).toFixed(1));
+  state.spectrumChart.data.datasets[0].data = powers.slice(0, -1);
+  state.spectrumChart.update('none');
+}
+
+// Update IQ chart
+function updateIQChart(iValues, qValues) {
+  if (!state.iqChart) return;
+  
+  const points = iValues.map((i, idx) => ({ x: i, y: qValues[idx] }));
+  state.iqChart.data.datasets[0].data = points;
+  state.iqChart.update('none');
+}
+
+// Control functions
+function startCapture() {
+  if (state.isCapturing) return;
+  state.isCapturing = true;
+  
+  fetch('http://localhost:5000/api/sdr/start', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      device_type: document.getElementById('device-select').value,
+      frequency: state.centerFreq,
+      sample_rate: state.sampleRate,
+    })
+  }).then(r => r.json()).then(data => {
+    console.log('Capture started:', data);
+    document.getElementById('start-btn').style.display = 'none';
+    document.getElementById('stop-btn').style.display = 'block';
+    document.getElementById('mode-display').textContent = 'CAPTURE';
+    
+    // Subscribe to WebSocket streams
+    state.socket.emit('subscribe_spectrum');
+    state.socket.emit('subscribe_iq');
+    state.socket.emit('subscribe_waterfall');
+  });
+}
+
+function stopCapture() {
+  state.isCapturing = false;
+  
+  fetch('http://localhost:5000/api/sdr/stop', { method: 'POST' })
+    .then(r => r.json())
+    .then(() => {
+      document.getElementById('start-btn').style.display = 'block';
+      document.getElementById('stop-btn').style.display = 'none';
+      document.getElementById('mode-display').textContent = 'IDLE';
+    });
+}
+
+function setFrequency() {
+  const freq = parseFloat(document.getElementById('freq-input').value) * 1e6;
+  state.centerFreq = freq;
+  
+  fetch('http://localhost:5000/api/sdr/setFreq', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ frequency: freq })
+  });
+  
+  document.getElementById('freq-display').textContent = (freq / 1e6).toFixed(1) + ' MHz';
+}
+
+function setSampleRate() {
+  state.sampleRate = parseFloat(document.getElementById('samplerate-select').value) * 1e6;
+  document.getElementById('samplerate-display').textContent = (state.sampleRate / 1e6).toFixed(1) + ' Msps';
+}
+
+function setFFTSize() {
+  state.fftSize = parseInt(document.getElementById('fft-size').value);
+}
+
+function selectDevice() {
+  const device = document.getElementById('device-select').value;
+  console.log('Selected device:', device);
+}
+
+function demodulate(type) {
+  console.log('Demodulating:', type);
+  fetch(`http://localhost:5000/api/demod/${type}`)
+    .then(r => r.json())
+    .then(data => {
+      console.log('Demod result:', data);
+      alert(`Demodulated ${type.toUpperCase()}: ${data.demodulation_type}`);
+    });
+}
+
+function saveCapture() {
+  fetch('http://localhost:5000/api/captures/save', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      name: `Capture_${new Date().toISOString()}`,
+      notes: 'Manual save'
+    })
+  }).then(r => r.json()).then(data => {
+    console.log('Capture saved:', data);
+    alert('Capture saved: ' + data.name);
+  });
+}
+
+function updateStatus(connected) {
+  const led = document.getElementById('status-led');
+  if (connected) {
+    led.classList.remove('inactive');
+  } else {
+    led.classList.add('inactive');
+  }
+}
+</script>
+
+</body>
+</html>
