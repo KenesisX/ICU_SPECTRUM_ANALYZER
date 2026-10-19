@@ -1,0 +1,896 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Spectrum Analyzer</title>
+<style>
+  :root {
+    --bg: #050505;
+    --panel: #0d0a0a;
+    --grid: #2a1414;
+    --trace: #ff2b2b;
+    --trace-dim: #7a1f1f;
+    --peak: #ffffff;
+    --amber: #ff5a5a;
+    --text: #d8d0d0;
+    --text-dim: #6b5d5d;
+    --border: #301c1c;
+    --waterfall-lo: #050505;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Berkeley Mono', 'IBM Plex Mono', 'SF Mono', Consolas, monospace;
+    height: 100%;
+  }
+  #app {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    min-height: 560px;
+    padding: 14px;
+    gap: 10px;
+  }
+
+  /* ---- Header ---- */
+  .header {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 8px 20px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border);
+  }
+  .header .title {
+    font-size: 15px;
+    letter-spacing: 0.5px;
+    color: #f2eaea;
+    font-weight: 600;
+  }
+  .header .title span { color: var(--trace); }
+  .readout-strip {
+    display: flex;
+    gap: 22px;
+    font-size: 11px;
+    color: var(--text-dim);
+  }
+  .readout-strip b { color: var(--amber); font-weight: 600; }
+
+  /* ---- Main grid ---- */
+  .main {
+    display: grid;
+    grid-template-columns: 1fr 220px;
+    gap: 10px;
+    flex: 1;
+    min-height: 0;
+  }
+  .scope-col {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    min-height: 0;
+  }
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    position: relative;
+  }
+  .panel-label {
+    position: absolute;
+    top: 6px; left: 10px;
+    font-size: 9.5px;
+    letter-spacing: 1px;
+    color: var(--text-dim);
+    z-index: 2;
+    pointer-events: none;
+  }
+
+  #spectrumPanel { flex: 1.6; min-height: 0; cursor: crosshair; }
+  #spectrumCanvas { width: 100%; height: 100%; display: block; }
+
+  #waterfallPanel { flex: 0.7; min-height: 0; }
+  #waterfallCanvas { width: 100%; height: 100%; display: block; image-rendering: pixelated; }
+
+  .click-readout {
+    position: absolute;
+    top: 6px; right: 10px;
+    font-size: 10px;
+    color: var(--amber);
+    z-index: 2;
+    background: rgba(10,13,10,0.7);
+    padding: 2px 6px;
+    border-radius: 2px;
+    pointer-events: none;
+  }
+
+  .freq-entry {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 10px;
+  }
+  .freq-entry input[type=text] {
+    flex: 1;
+    background: #0a0d0a;
+    border: 1px solid var(--border);
+    color: var(--trace);
+    font-family: inherit;
+    font-size: 11px;
+    padding: 5px 6px;
+    border-radius: 2px;
+    outline: none;
+  }
+  .freq-entry input[type=text]:focus { border-color: var(--trace-dim); }
+  .freq-entry button {
+    background: rgba(94,255,143,0.1);
+    border: 1px solid var(--trace-dim);
+    color: var(--trace);
+    font-family: inherit;
+    font-size: 10px;
+    padding: 5px 8px;
+    border-radius: 2px;
+    cursor: pointer;
+  }
+  .freq-entry button:hover { background: rgba(94,255,143,0.18); }
+
+  /* ---- Sidebar ---- */
+  .sidebar {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    min-height: 0;
+  }
+  .side-panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 10px;
+  }
+  .side-panel h4 {
+    margin: 0 0 8px 0;
+    font-size: 9.5px;
+    letter-spacing: 1px;
+    color: var(--text-dim);
+    font-weight: 500;
+  }
+
+  /* mode buttons */
+  .mode-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 4px;
+  }
+  .mode-btn {
+    background: #0a0d0a;
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    font-family: inherit;
+    font-size: 10px;
+    padding: 6px 2px;
+    border-radius: 2px;
+    cursor: pointer;
+    transition: all 0.12s ease;
+  }
+  .mode-btn:hover { border-color: var(--trace-dim); color: var(--text); }
+  .mode-btn.active {
+    background: rgba(94,255,143,0.10);
+    border-color: var(--trace);
+    color: var(--trace);
+  }
+
+  .slider-row { margin-bottom: 10px; }
+  .slider-row:last-child { margin-bottom: 0; }
+  .slider-row label {
+    display: flex;
+    justify-content: space-between;
+    font-size: 10.5px;
+    color: var(--text);
+    margin-bottom: 4px;
+  }
+  .slider-row label b { color: var(--amber); font-weight: 500; }
+  input[type=range] {
+    -webkit-appearance: none;
+    width: 100%;
+    height: 3px;
+    background: var(--border);
+    border-radius: 2px;
+    outline: none;
+  }
+  input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 11px; height: 11px;
+    background: var(--trace);
+    border-radius: 50%;
+    cursor: pointer;
+  }
+  input[type=range]::-moz-range-thumb {
+    width: 11px; height: 11px;
+    background: var(--trace);
+    border: none;
+    border-radius: 50%;
+    cursor: pointer;
+  }
+
+  .toggle-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 10.5px;
+    padding: 5px 0;
+    border-bottom: 1px solid #161d16;
+  }
+  .toggle-row:last-child { border-bottom: none; }
+  .switch {
+    width: 30px; height: 16px;
+    background: #1a221a;
+    border: 1px solid var(--border);
+    border-radius: 9px;
+    position: relative;
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+  .switch .knob {
+    position: absolute;
+    top: 1px; left: 1px;
+    width: 12px; height: 12px;
+    border-radius: 50%;
+    background: var(--text-dim);
+    transition: all 0.15s ease;
+  }
+  .switch.on { border-color: var(--trace-dim); background: rgba(94,255,143,0.08); }
+  .switch.on .knob { left: 15px; background: var(--trace); }
+
+  .peak-list {
+    font-size: 10px;
+    line-height: 1.9;
+  }
+  .peak-list .peak-item {
+    display: flex;
+    justify-content: space-between;
+    color: var(--text);
+  }
+  .peak-list .peak-item .f { color: var(--text-dim); }
+  .peak-list .peak-item .a { color: var(--peak); }
+
+  .footer-note {
+    font-size: 9.5px;
+    color: var(--text-dim);
+    text-align: center;
+    padding-top: 2px;
+  }
+
+  @media (max-width: 720px) {
+    .main { grid-template-columns: 1fr; }
+    .sidebar { flex-direction: row; flex-wrap: wrap; }
+    .side-panel { flex: 1 1 160px; }
+  }
+</style>
+</head>
+<body>
+<div id="app">
+
+  <div class="header">
+    <div class="title">SPECTRUM<span>::</span>ANALYZER</div>
+    <div class="readout-strip">
+      <div>CENTER <b id="rCenter">433.900 MHz</b></div>
+      <div>SPAN <b id="rSpan">40.0 MHz</b></div>
+      <div>RBW <b id="rRbw">10 kHz</b></div>
+      <div>PEAK <b id="rPeak">—</b></div>
+      <div>NOISE FLOOR <b id="rFloor">−96 dBm</b></div>
+      <div>SOURCE <b id="rSource" style="color:var(--text-dim);">SIMULATED</b></div>
+    </div>
+  </div>
+
+  <div class="main">
+    <div class="scope-col">
+      <div class="panel" id="spectrumPanel">
+        <div class="panel-label">AMPLITUDE vs FREQUENCY</div>
+        <div class="click-readout" id="clickReadout">click trace to inspect</div>
+        <canvas id="spectrumCanvas"></canvas>
+      </div>
+      <div class="panel" id="waterfallPanel">
+        <div class="panel-label">WATERFALL — TIME vs FREQUENCY</div>
+        <canvas id="waterfallCanvas"></canvas>
+      </div>
+    </div>
+
+    <div class="sidebar">
+      <div class="side-panel">
+        <h4>DEMODULATION <span style="font-weight:400; color:var(--text-dim);" id="demodHint">(local, or set --mode on the bridge)</span></h4>
+        <div class="mode-grid" id="modeGrid"></div>
+      </div>
+
+      <div class="side-panel">
+        <h4>DATA SOURCE</h4>
+        <div class="freq-entry">
+          <input type="text" id="wsUrlInput" placeholder="ws://localhost:8765" value="ws://localhost:8765">
+          <button id="wsConnectBtn">CONNECT</button>
+        </div>
+        <div style="font-size:9.5px; color:var(--text-dim);" id="wsStatus">not connected — showing simulated data</div>
+      </div>
+
+      <div class="side-panel">
+        <h4>TUNING</h4>
+        <div class="freq-entry">
+          <input type="text" id="freqInput" placeholder="e.g. 915.0 MHz">
+          <button id="freqGoBtn">TUNE</button>
+        </div>
+        <div class="slider-row">
+          <label>Center Freq <b id="lblCenter">433.9 MHz</b></label>
+          <input type="range" id="centerSlider" min="1" max="6000" step="0.1" value="433.9">
+        </div>
+        <div class="slider-row">
+          <label>Span <b id="lblSpan">40 MHz</b></label>
+          <input type="range" id="spanSlider" min="1" max="200" step="1" value="40">
+        </div>
+        <div class="slider-row">
+          <label>Gain <b id="lblGain">32 dB</b></label>
+          <input type="range" id="gainSlider" min="0" max="60" step="1" value="32">
+        </div>
+      </div>
+
+      <div class="side-panel">
+        <h4>WAVEFORM TYPE</h4>
+        <div class="mode-grid" id="waveGrid"></div>
+      </div>
+
+      <div class="side-panel">
+        <h4>DISPLAY</h4>
+        <div class="toggle-row">
+          <span>Peak hold</span>
+          <div class="switch" id="togPeakHold"><div class="knob"></div></div>
+        </div>
+        <div class="toggle-row">
+          <span>Avg trace</span>
+          <div class="switch on" id="togAvg"><div class="knob"></div></div>
+        </div>
+        <div class="toggle-row">
+          <span>Marker</span>
+          <div class="switch on" id="togMarker"><div class="knob"></div></div>
+        </div>
+      </div>
+
+      <div class="side-panel" style="flex:1; min-height:0; overflow:auto;">
+        <h4>SIGNAL PEAKS</h4>
+        <div class="peak-list" id="peakList"></div>
+      </div>
+
+      <div class="footer-note">simulated demo data — no live capture</div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ============================================================
+// Simulated spectrum data generator (no live RF capture / no
+// network scanning of any kind — purely synthetic waveforms
+// for display purposes).
+// ============================================================
+
+const modes = ["AM","FM","SSB","CW","LSB","USB","FSK","PSK"];
+let activeMode = "FM";
+
+const state = {
+  centerMHz: 433.9,
+  spanMHz: 40,
+  gain: 32,
+  peakHold: false,
+  avg: true,
+  marker: true,
+};
+
+const modeGrid = document.getElementById('modeGrid');
+modes.forEach(m => {
+  const b = document.createElement('button');
+  b.className = 'mode-btn' + (m === activeMode ? ' active' : '');
+  b.textContent = m;
+  b.dataset.mode = m;
+  b.addEventListener('click', () => {
+    activeMode = m;
+    [...modeGrid.children].forEach(c => c.classList.toggle('active', c === b));
+  });
+  modeGrid.appendChild(b);
+});
+
+const waveTypes = ["Sine","Square","Sawtooth","Pulse","Triangle","Chirp"];
+let activeWave = "Sine";
+const waveGrid = document.getElementById('waveGrid');
+waveTypes.forEach(w => {
+  const b = document.createElement('button');
+  b.className = 'mode-btn' + (w === activeWave ? ' active' : '');
+  b.textContent = w;
+  b.addEventListener('click', () => {
+    activeWave = w;
+    [...waveGrid.children].forEach(c => c.classList.toggle('active', c === b));
+    seedSignals();
+  });
+  waveGrid.appendChild(b);
+});
+
+function wireSwitch(id, key) {
+  const el = document.getElementById(id);
+  el.addEventListener('click', () => {
+    state[key] = !state[key];
+    el.classList.toggle('on', state[key]);
+  });
+}
+wireSwitch('togPeakHold', 'peakHold');
+wireSwitch('togAvg', 'avg');
+wireSwitch('togMarker', 'marker');
+
+const centerSlider = document.getElementById('centerSlider');
+const spanSlider = document.getElementById('spanSlider');
+const gainSlider = document.getElementById('gainSlider');
+const lblCenter = document.getElementById('lblCenter');
+const lblSpan = document.getElementById('lblSpan');
+const lblGain = document.getElementById('lblGain');
+const rCenter = document.getElementById('rCenter');
+const rSpan = document.getElementById('rSpan');
+const rPeak = document.getElementById('rPeak');
+
+function fmtMHz(v) { return v >= 1000 ? (v/1000).toFixed(3) + ' GHz' : v.toFixed(1) + ' MHz'; }
+
+centerSlider.addEventListener('input', () => {
+  state.centerMHz = parseFloat(centerSlider.value);
+  lblCenter.textContent = fmtMHz(state.centerMHz);
+  rCenter.textContent = fmtMHz(state.centerMHz);
+});
+spanSlider.addEventListener('input', () => {
+  state.spanMHz = parseFloat(spanSlider.value);
+  lblSpan.textContent = state.spanMHz + ' MHz';
+  rSpan.textContent = state.spanMHz.toFixed(1) + ' MHz';
+});
+gainSlider.addEventListener('input', () => {
+  state.gain = parseFloat(gainSlider.value);
+  lblGain.textContent = state.gain + ' dB';
+});
+
+function tuneToText(txt) {
+  if (!txt) return;
+  const cleaned = txt.trim().toLowerCase().replace(/mhz|ghz|khz/g, m => m);
+  let val = parseFloat(cleaned);
+  if (isNaN(val)) return;
+  if (cleaned.includes('ghz')) val *= 1000;
+  if (cleaned.includes('khz')) val /= 1000;
+  val = Math.min(6000, Math.max(1, val));
+  state.centerMHz = val;
+  centerSlider.value = val;
+  lblCenter.textContent = fmtMHz(val);
+  rCenter.textContent = fmtMHz(val);
+}
+document.getElementById('freqGoBtn').addEventListener('click', () => {
+  tuneToText(document.getElementById('freqInput').value);
+});
+document.getElementById('freqInput').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') tuneToText(e.target.value);
+});
+
+// --- synthetic signal model: a handful of drifting carriers + noise floor ---
+const NUM_BINS = 512;
+let synthSignals = [];
+function seedSignals() {
+  synthSignals = [];
+  const count = 3 + Math.floor(Math.random() * 3);
+  for (let i = 0; i < count; i++) {
+    synthSignals.push({
+      posFrac: 0.15 + Math.random() * 0.7,
+      width: 0.006 + Math.random() * 0.02,
+      baseAmp: 18 + Math.random() * 45,
+      drift: (Math.random() - 0.5) * 0.00015,
+      wobble: Math.random() * Math.PI * 2,
+      wobbleSpeed: 0.4 + Math.random() * 1.2,
+    });
+  }
+}
+seedSignals();
+setInterval(() => { if (Math.random() < 0.15) seedSignals(); }, 4000);
+
+let t = 0;
+let peakHoldBuffer = new Float32Array(NUM_BINS).fill(-999);
+let avgBuffer = new Float32Array(NUM_BINS).fill(-96);
+
+function genSpectrumFrame() {
+  const bins = new Float32Array(NUM_BINS);
+  const floor = -96 + (state.gain - 32) * 0.15;
+  for (let i = 0; i < NUM_BINS; i++) {
+    bins[i] = floor + (Math.random() - 0.5) * 4;
+  }
+  synthSignals.forEach(sig => {
+    sig.posFrac += sig.drift;
+    if (sig.posFrac < 0.05 || sig.posFrac > 0.95) sig.drift *= -1;
+    const centerBin = sig.posFrac * NUM_BINS;
+    const wob = Math.sin(t * sig.wobbleSpeed + sig.wobble) * 4;
+    const amp = sig.baseAmp + wob + (state.gain - 32) * 0.3;
+    const widthBins = sig.width * NUM_BINS;
+    for (let i = 0; i < NUM_BINS; i++) {
+      const d = (i - centerBin) / widthBins;
+      let shape;
+      switch (activeWave) {
+        case 'Square':
+          // flat-topped lobe with sharp shoulders
+          shape = (Math.abs(d) < 1 ? 1 : Math.exp(-((Math.abs(d)-1)*3)**2)) * amp;
+          break;
+        case 'Sawtooth':
+          // asymmetric skirt: sharp on the low side, gradual on the high side
+          shape = (d < 0 ? Math.exp(-d*d*6) : Math.exp(-d*d*0.9)) * amp;
+          break;
+        case 'Pulse':
+          // narrow spiky lobe with harmonics
+          shape = Math.exp(-d*d*10) * amp + Math.exp(-((d-1.6)**2)*20) * amp * 0.35 + Math.exp(-((d+1.6)**2)*20) * amp * 0.35;
+          break;
+        case 'Triangle':
+          // linear taper both sides
+          shape = Math.max(0, 1 - Math.abs(d)) * amp;
+          break;
+        case 'Chirp':
+          // asymmetric skirt that ripples, like a swept tone
+          shape = Math.exp(-d*d*1.2) * amp * (1 + 0.25 * Math.sin(d * 8));
+          break;
+        default: // Sine
+          shape = Math.exp(-d * d) * amp;
+      }
+      bins[i] += shape;
+    }
+  });
+  return bins.map(v => floor + Math.max(0, v - floor));
+}
+
+// ============================================================
+// Canvas rendering
+// ============================================================
+const specCanvas = document.getElementById('spectrumCanvas');
+const specCtx = specCanvas.getContext('2d');
+const wfCanvas = document.getElementById('waterfallCanvas');
+const wfCtx = wfCanvas.getContext('2d');
+
+function resizeCanvases() {
+  [specCanvas, wfCanvas].forEach(c => {
+    const rect = c.parentElement.getBoundingClientRect();
+    const dpr = window.devicePixelRatio || 1;
+    c.width = Math.max(1, Math.floor((rect.width) * dpr));
+    c.height = Math.max(1, Math.floor((rect.height) * dpr));
+    c.style.width = rect.width + 'px';
+    c.style.height = rect.height + 'px';
+  });
+  wfImageData = null;
+}
+window.addEventListener('resize', resizeCanvases);
+
+let wfImageData = null;
+let wfRowBuf = null;
+let lastPlotGeom = null; // { padL, padT, plotW, plotH, floor, ceil } in device pixels
+let clickedBin = null;
+let lastBinsFrame = null;
+
+function ampToColor(v, floor, ceil) {
+  let f = (v - floor) / (ceil - floor);
+  f = Math.min(1, Math.max(0, f));
+  // black -> deep red -> bright red -> white hot
+  let r, g, b;
+  if (f < 0.55) {
+    const k = f / 0.55;
+    r = 10 + k * 110;
+    g = 4;
+    b = 4;
+  } else if (f < 0.85) {
+    const k = (f - 0.55) / 0.30;
+    r = 120 + k * 135;
+    g = 4 + k * 40;
+    b = 4 + k * 40;
+  } else {
+    const k = (f - 0.85) / 0.15;
+    r = 255;
+    g = 44 + k * 211;
+    b = 44 + k * 211;
+  }
+  return [r, g, b];
+}
+
+function drawSpectrum(bins) {
+  const w = specCanvas.width, h = specCanvas.height;
+  const dpr = window.devicePixelRatio || 1;
+  specCtx.clearRect(0, 0, w, h);
+  specCtx.fillStyle = '#050505';
+  specCtx.fillRect(0, 0, w, h);
+
+  const floor = -100, ceil = -10;
+  const padL = 34 * dpr, padR = 8 * dpr, padT = 20 * dpr, padB = 20 * dpr;
+  const plotW = w - padL - padR, plotH = h - padT - padB;
+
+  // grid
+  specCtx.strokeStyle = 'rgba(255,43,43,0.10)';
+  specCtx.lineWidth = 1;
+  const hLines = 5;
+  specCtx.font = (9 * dpr) + 'px monospace';
+  specCtx.fillStyle = 'rgba(107,93,93,0.9)';
+  for (let i = 0; i <= hLines; i++) {
+    const y = padT + (plotH * i / hLines);
+    specCtx.beginPath();
+    specCtx.moveTo(padL, y);
+    specCtx.lineTo(padL + plotW, y);
+    specCtx.stroke();
+    const dbm = ceil - (ceil - floor) * (i / hLines);
+    specCtx.fillText(dbm.toFixed(0), 2 * dpr, y + 3 * dpr);
+  }
+  const vLines = 8;
+  for (let i = 0; i <= vLines; i++) {
+    const x = padL + (plotW * i / vLines);
+    specCtx.beginPath();
+    specCtx.moveTo(x, padT);
+    specCtx.lineTo(x, padT + plotH);
+    specCtx.stroke();
+  }
+
+  function ytop(v) {
+    const f = Math.min(1, Math.max(0, (v - floor) / (ceil - floor)));
+    return padT + plotH * (1 - f);
+  }
+
+  lastPlotGeom = { padL, padT, plotW, plotH, floor, ceil };
+
+  // average trace update
+  for (let i = 0; i < NUM_BINS; i++) {
+    avgBuffer[i] = avgBuffer[i] * 0.85 + bins[i] * 0.15;
+    if (bins[i] > peakHoldBuffer[i]) peakHoldBuffer[i] = bins[i];
+  }
+
+  const traceVals = state.avg ? avgBuffer : bins;
+
+  // fill under trace
+  specCtx.beginPath();
+  specCtx.moveTo(padL, padT + plotH);
+  for (let i = 0; i < NUM_BINS; i++) {
+    const x = padL + plotW * (i / (NUM_BINS - 1));
+    const y = ytop(traceVals[i]);
+    specCtx.lineTo(x, y);
+  }
+  specCtx.lineTo(padL + plotW, padT + plotH);
+  specCtx.closePath();
+  const grad = specCtx.createLinearGradient(0, padT, 0, padT + plotH);
+  grad.addColorStop(0, 'rgba(255,43,43,0.30)');
+  grad.addColorStop(1, 'rgba(255,43,43,0.02)');
+  specCtx.fillStyle = grad;
+  specCtx.fill();
+
+  // trace line
+  specCtx.beginPath();
+  specCtx.strokeStyle = '#ff2b2b';
+  specCtx.lineWidth = 1.4 * dpr;
+  for (let i = 0; i < NUM_BINS; i++) {
+    const x = padL + plotW * (i / (NUM_BINS - 1));
+    const y = ytop(traceVals[i]);
+    if (i === 0) specCtx.moveTo(x, y); else specCtx.lineTo(x, y);
+  }
+  specCtx.stroke();
+
+  // peak hold trace
+  if (state.peakHold) {
+    specCtx.beginPath();
+    specCtx.strokeStyle = 'rgba(255,255,255,0.85)';
+    specCtx.lineWidth = 1 * dpr;
+    for (let i = 0; i < NUM_BINS; i++) {
+      const x = padL + plotW * (i / (NUM_BINS - 1));
+      const y = ytop(peakHoldBuffer[i]);
+      if (i === 0) specCtx.moveTo(x, y); else specCtx.lineTo(x, y);
+    }
+    specCtx.stroke();
+  }
+
+  // marker on strongest bin
+  let maxV = -999, maxI = 0;
+  for (let i = 0; i < NUM_BINS; i++) if (bins[i] > maxV) { maxV = bins[i]; maxI = i; }
+  if (state.marker) {
+    const x = padL + plotW * (maxI / (NUM_BINS - 1));
+    const y = ytop(bins[maxI]);
+    specCtx.strokeStyle = 'rgba(255,90,90,0.6)';
+    specCtx.setLineDash([2 * dpr, 3 * dpr]);
+    specCtx.beginPath();
+    specCtx.moveTo(x, padT);
+    specCtx.lineTo(x, padT + plotH);
+    specCtx.stroke();
+    specCtx.setLineDash([]);
+    specCtx.fillStyle = '#ffffff';
+    specCtx.beginPath();
+    specCtx.arc(x, y, 2.5 * dpr, 0, Math.PI * 2);
+    specCtx.fill();
+
+    const freqAtMax = state.centerMHz - state.spanMHz/2 + state.spanMHz * (maxI / (NUM_BINS - 1));
+    rPeak.textContent = fmtMHz(freqAtMax) + ' / ' + maxV.toFixed(1) + ' dBm';
+  }
+
+  // clicked-point marker (independent of the auto marker above)
+  if (clickedBin) {
+    const x = padL + plotW * (clickedBin.i / (NUM_BINS - 1));
+    const y = ytop(bins[clickedBin.i]);
+    specCtx.strokeStyle = '#ff2b2b';
+    specCtx.lineWidth = 1.5 * dpr;
+    specCtx.beginPath();
+    specCtx.arc(x, y, 4 * dpr, 0, Math.PI * 2);
+    specCtx.stroke();
+  }
+
+  return { maxV, maxI };
+}
+
+function pushWaterfallRow(bins) {
+  const w = wfCanvas.width, h = wfCanvas.height;
+  if (!wfImageData || wfImageData.width !== w || wfImageData.height !== h) {
+    wfCtx.fillStyle = '#050505';
+    wfCtx.fillRect(0, 0, w, h);
+    wfImageData = wfCtx.getImageData(0, 0, w, h);
+  }
+  // shift existing image down by 1 row
+  const rowBytes = w * 4;
+  wfImageData.data.copyWithin(rowBytes, 0, wfImageData.data.length - rowBytes);
+
+  for (let x = 0; x < w; x++) {
+    const binIdx = Math.floor((x / w) * NUM_BINS);
+    const v = bins[binIdx];
+    const [r, g, b] = ampToColor(v, -100, -20);
+    const idx = x * 4;
+    wfImageData.data[idx] = r;
+    wfImageData.data[idx+1] = g;
+    wfImageData.data[idx+2] = b;
+    wfImageData.data[idx+3] = 255;
+  }
+  wfCtx.putImageData(wfImageData, 0, 0);
+}
+
+function findPeaks(bins) {
+  const peaks = [];
+  const floor = -96;
+  for (let i = 2; i < NUM_BINS - 2; i++) {
+    if (bins[i] > floor + 8 &&
+        bins[i] > bins[i-1] && bins[i] > bins[i+1] &&
+        bins[i] >= bins[i-2] && bins[i] >= bins[i+2]) {
+      peaks.push({ i, v: bins[i] });
+    }
+  }
+  peaks.sort((a,b) => b.v - a.v);
+  return peaks.slice(0, 6);
+}
+
+function renderPeakList(bins) {
+  const list = document.getElementById('peakList');
+  const peaks = findPeaks(bins);
+  if (peaks.length === 0) {
+    list.innerHTML = '<div style="color:var(--text-dim)">no peaks above threshold</div>';
+    return;
+  }
+  list.innerHTML = peaks.map(p => {
+    const freq = state.centerMHz - state.spanMHz/2 + state.spanMHz * (p.i / (NUM_BINS - 1));
+    return `<div class="peak-item"><span class="f">${fmtMHz(freq)}</span><span class="a">${p.v.toFixed(1)} dBm</span></div>`;
+  }).join('');
+}
+
+let frameCount = 0;
+
+// ---- Live data bridge (optional) ----
+// Connects to a local script you run yourself, which reads your own
+// SDR hardware (HackRF/RTL-SDR) and streams FFT power bins as JSON:
+//   { bins: [-91.2, -88.4, ...], centerMHz: 433.9, spanMHz: 40 }
+// If no connection is made/kept alive, the display just uses the
+// built-in simulated generator above — nothing here reaches out
+// anywhere on its own.
+let liveSocket = null;
+let liveBins = null;
+let liveActive = false;
+
+function setSource(label, color) {
+  const el = document.getElementById('rSource');
+  el.textContent = label;
+  el.style.color = color;
+}
+
+function connectLive(url) {
+  try {
+    if (liveSocket) { liveSocket.close(); }
+    liveSocket = new WebSocket(url);
+    document.getElementById('wsStatus').textContent = 'connecting...';
+    liveSocket.onopen = () => {
+      liveActive = true;
+      document.getElementById('wsStatus').textContent = 'connected: ' + url;
+      setSource('LIVE', '#ff2b2b');
+    };
+    liveSocket.onmessage = (ev) => {
+      try {
+        const msg = JSON.parse(ev.data);
+        if (Array.isArray(msg.bins)) {
+          liveBins = Float32Array.from(msg.bins);
+          if (typeof msg.centerMHz === 'number') {
+            state.centerMHz = msg.centerMHz;
+            lblCenter.textContent = fmtMHz(state.centerMHz);
+            rCenter.textContent = fmtMHz(state.centerMHz);
+            centerSlider.value = Math.min(6000, Math.max(1, state.centerMHz));
+          }
+          if (typeof msg.spanMHz === 'number') {
+            state.spanMHz = msg.spanMHz;
+            lblSpan.textContent = state.spanMHz + ' MHz';
+            rSpan.textContent = state.spanMHz.toFixed(1) + ' MHz';
+          }
+          if (typeof msg.mode === 'string') {
+            const modeLabel = msg.mode.toUpperCase();
+            [...modeGrid.children].forEach(c => {
+              c.classList.toggle('active', c.textContent === modeLabel);
+            });
+            activeMode = modeLabel;
+          }
+        }
+      } catch (e) { /* ignore malformed frame */ }
+    };
+    liveSocket.onclose = () => {
+      liveActive = false;
+      liveBins = null;
+      document.getElementById('wsStatus').textContent = 'disconnected — showing simulated data';
+      setSource('SIMULATED', 'var(--text-dim)');
+    };
+    liveSocket.onerror = () => {
+      document.getElementById('wsStatus').textContent = 'connection failed — showing simulated data';
+    };
+  } catch (e) {
+    document.getElementById('wsStatus').textContent = 'invalid URL';
+  }
+}
+
+document.getElementById('wsConnectBtn').addEventListener('click', () => {
+  const url = document.getElementById('wsUrlInput').value.trim();
+  if (url) connectLive(url);
+});
+
+function resampleToBinCount(arr, n) {
+  if (arr.length === n) return arr;
+  const out = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    const srcIdx = Math.min(arr.length - 1, Math.floor((i / n) * arr.length));
+    out[i] = arr[srcIdx];
+  }
+  return out;
+}
+
+function loop() {
+  t += 0.016;
+  let bins;
+  if (liveActive && liveBins) {
+    bins = resampleToBinCount(liveBins, NUM_BINS);
+  } else {
+    bins = genSpectrumFrame();
+  }
+  lastBinsFrame = bins;
+  drawSpectrum(bins);
+  updateClickReadout();
+  if (frameCount % 2 === 0) pushWaterfallRow(bins);
+  if (frameCount % 10 === 0) renderPeakList(bins);
+  frameCount++;
+  requestAnimationFrame(loop);
+}
+
+function updateClickReadout() {
+  const el = document.getElementById('clickReadout');
+  if (!clickedBin || !lastPlotGeom || !lastBinsFrame) return;
+  const { i } = clickedBin;
+  const v = lastBinsFrame[i];
+  const freq = state.centerMHz - state.spanMHz/2 + state.spanMHz * (i / (NUM_BINS - 1));
+  el.textContent = `${fmtMHz(freq)}  |  ${v.toFixed(1)} dBm`;
+}
+
+specCanvas.addEventListener('click', (e) => {
+  if (!lastPlotGeom) return;
+  const rect = specCanvas.getBoundingClientRect();
+  const dpr = window.devicePixelRatio || 1;
+  const xDevice = (e.clientX - rect.left) * dpr;
+  const { padL, plotW } = lastPlotGeom;
+  const frac = Math.min(1, Math.max(0, (xDevice - padL) / plotW));
+  const i = Math.round(frac * (NUM_BINS - 1));
+  clickedBin = { i };
+  updateClickReadout();
+});
+
+resizeCanvases();
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
